@@ -1,15 +1,5 @@
-# Node
-node_modules/
+ node_modules/
 .env
-
-# Logs
+uploads/
 logs
 *.log
-npm-debug.log*
-
-# Uploads
-uploads/
-
-# System files
-.DS_Store
-Thumbs.db

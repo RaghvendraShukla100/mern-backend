@@ -2,6 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import { connectDB } from "./config/db.js";
 import userRoutes from "./routes/userRoutes.js";
+import postRoutes from "./routes/postRoutes.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -20,11 +21,12 @@ app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
 // Routes
 app.use("/api/users", userRoutes);
+app.use("/api/posts", postRoutes);
 
 // Global error handler (optional)
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).send("Something broke!");
+  res.status(500).json({ message: "Something broke!", error: err.message });
 });
 
 // Start server
