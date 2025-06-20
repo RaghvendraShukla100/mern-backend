@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import { connectDB } from "./config/db.js";
 import userRoutes from "./routes/userRoutes.js";
 import postRoutes from "./routes/postRoutes.js";
+import commentRoutes from "./routes/commentRoutes.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -22,6 +23,7 @@ app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 // Routes
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
+app.use("/api/comments", commentRoutes);
 
 // Global error handler (optional)
 app.use((err, req, res, next) => {
