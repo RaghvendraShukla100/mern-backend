@@ -7,7 +7,7 @@ import Notification from "../models/notificationSchema.js";
 // @access  Private
 export const createComment = async (req, res) => {
   try {
-    const { text } = req.body;
+    const { text, parentComment } = req.body; // For threaded comments
     const { postId } = req.params;
 
     if (!text) {
@@ -15,7 +15,7 @@ export const createComment = async (req, res) => {
     }
 
     // Find the post and its creator
-    const post = await Post.findById(postId).populate("createdBy", "name");
+    const post = await Post.findById(postId).select("createdBy");
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
@@ -25,21 +25,22 @@ export const createComment = async (req, res) => {
       text,
       createdBy: req.user._id,
       post: postId,
+      postCreator: post.createdBy,
+      parentComment: parentComment || null,
     });
 
-    // Add comment ID to post's comments array
-    post.comments.push(comment._id);
-    await post.save();
+    // Optionally: increment comment count on post
+    await Post.findByIdAndUpdate(postId, { $inc: { commentCount: 1 } });
 
     // Generate notification if commenter is not the post creator
-    if (post.createdBy._id.toString() !== req.user._id.toString()) {
+    if (post.createdBy.toString() !== req.user._id.toString()) {
       await Notification.create({
-        user: post.createdBy._id, // Recipient of notification
-        type: "comment", // Type of action
-        from: req.user._id, // Who triggered the notification
-        post: postId, // Related post
-        comment: comment._id, // Related comment
-        message: `${req.user.name || "Someone"} commented on your post`, // Friendly message
+        user: post.createdBy, // Recipient: post creator
+        type: "comment",
+        from: req.user._id, // Who made the comment
+        post: postId,
+        comment: comment._id,
+        message: `${req.user.name || "Someone"} commented on your post`,
       });
     }
 
@@ -62,19 +63,16 @@ export const deleteComment = async (req, res) => {
       return res.status(404).json({ message: "Comment not found" });
     }
 
-    // Only author of comment can delete
     if (comment.createdBy.toString() !== req.user._id.toString()) {
       return res
         .status(403)
         .json({ message: "Not authorized to delete this comment" });
     }
 
-    // Remove comment from Post's comments array
-    await Post.findByIdAndUpdate(comment.post, {
-      $pull: { comments: comment._id },
-    });
-
     await comment.deleteOne();
+
+    // Optionally: decrement comment count
+    await Post.findByIdAndUpdate(comment.post, { $inc: { commentCount: -1 } });
 
     res.json({ message: "Comment deleted" });
   } catch (err) {
@@ -94,7 +92,6 @@ export const updateComment = async (req, res) => {
       return res.status(404).json({ message: "Comment not found" });
     }
 
-    // Only author can update
     if (comment.createdBy.toString() !== req.user._id.toString()) {
       return res
         .status(403)
