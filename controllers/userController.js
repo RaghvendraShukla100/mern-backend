@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import User from "../models/userSchema.js";
+import Notification from "../models/notificationSchema.js";
 
 dotenv.config();
 
@@ -166,8 +167,14 @@ export const followUser = async (req, res) => {
 
     await currentUser.save();
     await userToFollow.save();
+    await Notification.create({
+      user: userToFollow._id,
+      type: "follow",
+      from: currentUser._id,
+      message: `${currentUser.name} started following you`,
+    });
 
-    res.json({ message: "Followed user" });
+    res.json({ message: "Followed user and notification sent" });
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
   }
