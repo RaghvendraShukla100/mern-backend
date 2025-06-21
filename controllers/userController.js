@@ -1,40 +1,34 @@
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import crypto from "crypto";
 import User from "../models/userSchema.js";
 
 dotenv.config();
 
-// Generate JWT token using _id (better than email)
+// Generate JWT token
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: "30d" });
 };
 
-// @desc    Register user
-// @route   POST /api/users/register
-// @access  Public
+// Generate random token
+const generateRandomToken = () => {
+  return crypto.randomBytes(20).toString("hex");
+};
+
+// REGISTER USER
 export const registerUser = async (req, res) => {
-  const { name, username, email, mobile, age, password, bio } = req.body;
+  const { name, username, email, mobile, age, password, bio, isPrivate } =
+    req.body;
   const profilePic = req.file ? req.file.path : "";
 
   try {
-    // Check if email already exists
-    const existingEmail = await User.findOne({ email });
-    if (existingEmail) {
-      return res.status(400).json({ message: "Email already registered" });
-    }
-
-    // Check if mobile already exists
-    const existingMobile = await User.findOne({ mobile });
-    if (existingMobile) {
+    const existing = await User.findOne({
+      $or: [{ email }, { username }, { mobile }],
+    });
+    if (existing) {
       return res
         .status(400)
-        .json({ message: "Mobile number already registered" });
-    }
-
-    // Check if username already exists
-    const existingUsername = await User.findOne({ username });
-    if (existingUsername) {
-      return res.status(400).json({ message: "Username already taken" });
+        .json({ message: "Email, username or mobile already registered" });
     }
 
     const user = await User.create({
@@ -46,6 +40,7 @@ export const registerUser = async (req, res) => {
       bio,
       profilePic,
       password,
+      isPrivate: isPrivate || false,
     });
 
     res.status(201).json({
@@ -57,39 +52,23 @@ export const registerUser = async (req, res) => {
       age: user.age,
       bio: user.bio,
       profilePic: user.profilePic,
+      isPrivate: user.isPrivate,
       token: generateToken(user._id),
     });
-  } catch (error) {
-    if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0];
-      return res.status(400).json({
-        message: `${
-          field.charAt(0).toUpperCase() + field.slice(1)
-        } already exists`,
-      });
-    }
-    res.status(500).json({ message: "Server error", error: error.message });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
-// @desc    Authenticate user & get token
-// @route   POST /api/users/login
-// @access  Public
+// LOGIN USER
 export const loginUser = async (req, res) => {
   const { email, password } = req.body;
-
   try {
     const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(401).json({ message: "Invalid email" });
-    }
+    if (!user) return res.status(401).json({ message: "Invalid email" });
 
     const isMatch = await user.comparePassword(password);
-
-    if (!isMatch) {
-      return res.status(401).json({ message: "Invalid password" });
-    }
+    if (!isMatch) return res.status(401).json({ message: "Invalid password" });
 
     res.json({
       _id: user._id,
@@ -97,79 +76,152 @@ export const loginUser = async (req, res) => {
       username: user.username,
       email: user.email,
       profilePic: user.profilePic,
+      isPrivate: user.isPrivate,
       token: generateToken(user._id),
     });
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
-// @desc    Get user data (only own data)
-// @route   GET /api/users/me
-// @access  Private
+// GET PROFILE
 export const getUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select("-password");
-    if (user) {
-      res.json(user);
-    } else {
-      res.status(404).json({ message: "User not found" });
-    }
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
-// @desc    Update user data (only own data)
-// @route   PUT /api/users/me
-// @access  Private
+// UPDATE PROFILE
 export const updateUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (user) {
-      user.name = req.body.name || user.name;
-      user.username = req.body.username || user.username;
-      user.mobile = req.body.mobile || user.mobile;
-      user.age = req.body.age || user.age;
-      user.bio = req.body.bio || user.bio;
+    user.name = req.body.name || user.name;
+    user.username = req.body.username || user.username;
+    user.mobile = req.body.mobile || user.mobile;
+    user.age = req.body.age || user.age;
+    user.bio = req.body.bio || user.bio;
+    user.isPrivate =
+      req.body.isPrivate !== undefined ? req.body.isPrivate : user.isPrivate;
 
-      if (req.file) {
-        user.profilePic = req.file.path;
-      }
+    if (req.file) user.profilePic = req.file.path;
+    if (req.body.password) user.password = req.body.password;
 
-      if (req.body.password) {
-        user.password = req.body.password;
-      }
+    await user.save();
 
-      const updatedUser = await user.save();
-
-      res.json({
-        _id: updatedUser._id,
-        name: updatedUser.name,
-        username: updatedUser.username,
-        email: updatedUser.email,
-        mobile: updatedUser.mobile,
-        age: updatedUser.age,
-        bio: updatedUser.bio,
-        profilePic: updatedUser.profilePic,
-      });
-    } else {
-      res.status(404).json({ message: "User not found" });
-    }
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.json({
+      _id: user._id,
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      mobile: user.mobile,
+      age: user.age,
+      bio: user.bio,
+      profilePic: user.profilePic,
+      isPrivate: user.isPrivate,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
-// @desc    Delete user account
-// @route   DELETE /api/users/me
-// @access  Private
+// DELETE ACCOUNT
 export const deleteUserProfile = async (req, res) => {
   try {
     await User.findByIdAndDelete(req.user._id);
     res.json({ message: "User deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+// FOLLOW USER
+export const followUser = async (req, res) => {
+  try {
+    const userToFollow = await User.findById(req.params.id);
+    const currentUser = await User.findById(req.user._id);
+
+    if (!userToFollow)
+      return res.status(404).json({ message: "User not found" });
+
+    if (userToFollow._id.equals(currentUser._id))
+      return res.status(400).json({ message: "You cannot follow yourself" });
+
+    if (currentUser.following.includes(userToFollow._id))
+      return res.status(400).json({ message: "Already following" });
+
+    if (userToFollow.isPrivate) {
+      // For private accounts, you'd implement a follow request system (optional)
+      return res
+        .status(403)
+        .json({ message: "Follow request required for private account" });
+    }
+
+    currentUser.following.push(userToFollow._id);
+    userToFollow.followers.push(currentUser._id);
+
+    await currentUser.save();
+    await userToFollow.save();
+
+    res.json({ message: "Followed user" });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+// UNFOLLOW USER
+export const unfollowUser = async (req, res) => {
+  try {
+    const userToUnfollow = await User.findById(req.params.id);
+    const currentUser = await User.findById(req.user._id);
+
+    if (!userToUnfollow)
+      return res.status(404).json({ message: "User not found" });
+
+    currentUser.following = currentUser.following.filter(
+      (id) => !id.equals(userToUnfollow._id)
+    );
+    userToUnfollow.followers = userToUnfollow.followers.filter(
+      (id) => !id.equals(currentUser._id)
+    );
+
+    await currentUser.save();
+    await userToUnfollow.save();
+
+    res.json({ message: "Unfollowed user" });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+// GET FOLLOWERS
+export const getFollowers = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).populate(
+      "followers",
+      "name username profilePic"
+    );
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json(user.followers);
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+// GET FOLLOWING
+export const getFollowing = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).populate(
+      "following",
+      "name username profilePic"
+    );
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json(user.following);
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };

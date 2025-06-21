@@ -4,6 +4,7 @@ import bcrypt from "bcrypt";
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
+
     username: {
       type: String,
       required: true,
@@ -11,21 +12,27 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+
     email: {
       type: String,
       required: true,
       unique: true,
       match: [/\S+@\S+\.\S+/, "Email is invalid"],
     },
+
     mobile: {
       type: String,
       required: true,
       unique: true,
       match: [/^\d{10}$/, "Mobile number must be 10 digits"],
     },
+
     age: { type: Number, min: 13, default: null },
+
     bio: { type: String, default: "" },
+
     profilePic: { type: String, default: "" },
+
     password: {
       type: String,
       required: true,
@@ -33,24 +40,28 @@ const userSchema = new mongoose.Schema(
       validate: {
         validator: function (value) {
           if (this.isModified("password")) {
-            // Only validate if password is modified
             return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?#&])[A-Za-z\d@$!%*?#&]{8,}$/.test(
               value
             );
           }
-          return true; // If not modified, always valid
+          return true;
         },
         message:
           "Password must contain 1 uppercase, 1 lowercase, 1 number, 1 special character",
       },
     },
-    followers: [
-      { type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] },
-    ],
-    following: [
-      { type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] },
-    ],
+
+    followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+
+    following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+
     isVerified: { type: Boolean, default: false },
+
+    passwordResetToken: { type: String },
+
+    passwordResetExpires: { type: Date },
+
+    isPrivate: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
@@ -68,4 +79,5 @@ userSchema.methods.comparePassword = function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-export default mongoose.model("User", userSchema);
+const User = mongoose.model("User", userSchema);
+export default User;

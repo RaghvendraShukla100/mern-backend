@@ -1,43 +1,77 @@
 import Post from "../models/postSchema.js";
-import Comment from "../models/commentSchema.js"; // Assuming you'll create this
+import Notification from "../models/notificationSchema.js";
+import User from "../models/userSchema.js"; // Needed to get followers
 import mongoose from "mongoose";
 
-// @desc Create a post
-// @route POST /api/posts
-// @access Private
+/**
+ * @desc    Create a post with multiple media files & notify followers
+ * @route   POST /api/posts
+ * @access  Private
+ */
 export const createPost = async (req, res) => {
   try {
     const { caption, tags } = req.body;
-    const image = req.file ? req.file.path : null;
 
-    if (!image) {
-      return res.status(400).json({ message: "Image is required" });
+    // Validate media presence
+    if (!req.files || req.files.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "At least one media file is required" });
     }
 
+    // Format media files
+    const media = req.files.map((file) => ({
+      url: file.path,
+      type: file.mimetype.startsWith("video") ? "video" : "image",
+    }));
+
+    // Create the post
     const post = await Post.create({
       caption,
-      image,
+      media,
       createdBy: req.user._id,
-      tags,
+      tags: tags
+        ? Array.isArray(tags)
+          ? tags
+          : tags.split(",").map((tag) => tag.trim().toLowerCase())
+        : [],
     });
 
-    res.status(201).json(post);
+    // Fetch followers of the user
+    const user = await User.findById(req.user._id).select("followers");
+
+    if (user && user.followers.length > 0) {
+      // Generate notifications for followers
+      const notifications = user.followers.map((followerId) => ({
+        user: followerId, // Notification recipient
+        type: "post", // Type of notification
+        from: req.user._id, // Who created the post
+        post: post._id, // The new post ID
+        message: `${req.user.name || "Someone"} posted a new update`,
+      }));
+
+      // Insert notifications in bulk
+      await Notification.insertMany(notifications);
+    }
+
+    res.status(201).json({
+      message: "Post created and followers notified",
+      post,
+    });
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
-// @desc Get all posts (feed)
-// @route GET /api/posts
-// @access Private
+/**
+ * @desc    Get all posts (feed)
+ * @route   GET /api/posts
+ * @access  Private
+ */
 export const getPosts = async (req, res) => {
   try {
     const posts = await Post.find()
       .populate("createdBy", "name username profilePic")
-      .populate({
-        path: "comments",
-        populate: { path: "commentedBy", select: "name username" },
-      })
       .sort({ createdAt: -1 });
 
     res.json(posts);
@@ -46,13 +80,14 @@ export const getPosts = async (req, res) => {
   }
 };
 
-// @desc Like a post
-// @route PUT /api/posts/:id/like
-// @access Private
+/**
+ * @desc    Like a post
+ * @route   PUT /api/posts/:id/like
+ * @access  Private
+ */
 export const likePost = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
-
     if (!post) return res.status(404).json({ message: "Post not found" });
 
     if (post.likes.includes(req.user._id)) {
@@ -68,19 +103,19 @@ export const likePost = async (req, res) => {
   }
 };
 
-// @desc Unlike a post
-// @route PUT /api/posts/:id/unlike
-// @access Private
+/**
+ * @desc    Unlike a post
+ * @route   PUT /api/posts/:id/unlike
+ * @access  Private
+ */
 export const unlikePost = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
-
     if (!post) return res.status(404).json({ message: "Post not found" });
 
     post.likes = post.likes.filter(
-      (userId) => userId.toString() !== req.user._id.toString()
+      (id) => id.toString() !== req.user._id.toString()
     );
-
     await post.save();
 
     res.json({ message: "Post unliked" });
@@ -89,13 +124,14 @@ export const unlikePost = async (req, res) => {
   }
 };
 
-// @desc Delete post
-// @route DELETE /api/posts/:id
-// @access Private
+/**
+ * @desc    Delete post
+ * @route   DELETE /api/posts/:id
+ * @access  Private
+ */
 export const deletePost = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
-
     if (!post) return res.status(404).json({ message: "Post not found" });
 
     if (post.createdBy.toString() !== req.user._id.toString()) {
@@ -111,13 +147,14 @@ export const deletePost = async (req, res) => {
   }
 };
 
-// @desc Update post (caption or tags)
-// @route PUT /api/posts/:id
-// @access Private
+/**
+ * @desc    Update caption, tags or replace media
+ * @route   PUT /api/posts/:id
+ * @access  Private
+ */
 export const updatePost = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
-
     if (!post) return res.status(404).json({ message: "Post not found" });
 
     if (post.createdBy.toString() !== req.user._id.toString()) {
@@ -131,15 +168,17 @@ export const updatePost = async (req, res) => {
     if (req.body.tags) {
       post.tags = Array.isArray(req.body.tags)
         ? req.body.tags
-        : req.body.tags.split(",").map((tag) => tag.trim());
+        : req.body.tags.split(",").map((tag) => tag.trim().toLowerCase());
     }
 
-    if (req.file) {
-      post.image = req.file.path;
+    if (req.files && req.files.length > 0) {
+      post.media = req.files.map((file) => ({
+        url: file.path,
+        type: file.mimetype.startsWith("video") ? "video" : "image",
+      }));
     }
 
     const updated = await post.save();
-
     res.json(updated);
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
