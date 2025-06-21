@@ -11,35 +11,55 @@ export const likePost = async (req, res) => {
   try {
     const { postId } = req.params;
 
-    // Check if the post exists
-    const post = await Post.findById(postId).populate("createdBy", "name");
-    if (!post) return res.status(404).json({ message: "Post not found" });
+    // 💡 Add debug logs
+    console.log("🔹 User:", req.user);
+    console.log("🔹 PostId:", postId);
 
-    // Prevent duplicate likes
+    const post = await Post.findById(postId).populate("createdBy", "name");
+    if (!post) {
+      console.log("❌ Post not found:", postId);
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    console.log("✅ Post found:", post._id);
+
     const existingLike = await Like.findOne({
       user: req.user._id,
       post: postId,
     });
+    console.log("🔹 Existing like:", existingLike);
+
     if (existingLike) {
       return res.status(400).json({ message: "Post already liked" });
     }
 
-    // Create the like
-    const like = await Like.create({ user: req.user._id, post: postId });
+    const like = await Like.create({
+      user: req.user._id,
+      post: postId,
+    });
+    console.log("✅ Like created:", like);
 
-    // Create notification if liker is not post creator
     if (post.createdBy._id.toString() !== req.user._id.toString()) {
-      await Notification.create({
-        user: post.createdBy._id, // Recipient of notification
-        type: "like", // Notification type
-        from: req.user._id, // User who liked
-        post: postId, // The post liked
-        message: `${req.user.name || "Someone"} liked your post`,
-      });
+      try {
+        await Notification.create({
+          user: post.createdBy._id,
+          from: req.user._id,
+          type: "like",
+          post: postId,
+          message: `${req.user.name || "Someone"} liked your post`,
+        });
+        console.log("🔔 Notification created");
+      } catch (err) {
+        console.error("❌ Failed to create notification:", err);
+      }
     }
 
-    res.status(201).json({ message: "Post liked and notification sent", like });
+    res.status(201).json({
+      message: "Post liked and notification sent",
+      like,
+    });
   } catch (err) {
+    console.error("💥 Error in likePost:", err);
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
@@ -53,7 +73,7 @@ export const unlikePost = async (req, res) => {
   try {
     const { postId } = req.params;
 
-    // Find and delete the like
+    // Remove the like if exists
     const like = await Like.findOneAndDelete({
       user: req.user._id,
       post: postId,
@@ -65,6 +85,7 @@ export const unlikePost = async (req, res) => {
 
     res.json({ message: "Post unliked" });
   } catch (err) {
+    console.error("💥 Error in unlikePost:", err);
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
@@ -72,17 +93,21 @@ export const unlikePost = async (req, res) => {
 /**
  * @desc    Get like count for a post
  * @route   GET /api/likes/:postId
- * @access  Private (or Public depending on your app policy)
+ * @access  Private (or Public as per app policy)
  */
 export const getPostLikes = async (req, res) => {
   try {
     const { postId } = req.params;
 
-    // Count number of likes for the post
+    // Count likes for the post
     const count = await Like.countDocuments({ post: postId });
 
-    res.json({ postId, likes: count });
+    res.json({
+      postId,
+      likes: count,
+    });
   } catch (err) {
+    console.error("💥 Error in getPostLikes:", err);
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
