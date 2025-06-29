@@ -6,15 +6,15 @@ import { protect } from "../middlewares/authMiddleware.js";
 import {
   createPost,
   getPosts,
-  likePost,
-  unlikePost,
   deletePost,
   updatePost,
 } from "../controllers/postController.js";
 
 const router = express.Router();
 
-// Multer config
+/**
+ * ⚡ Multer configuration for post media uploads
+ */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = "uploads/posts";
@@ -31,7 +31,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB per file
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max per file
   fileFilter: (req, file, cb) => {
     if (
       file.mimetype.startsWith("image") ||
@@ -44,12 +44,21 @@ const upload = multer({
   },
 });
 
-// Routes
+/**
+ * 🛠️ Routes
+ */
+
+// Create a post with media
 router.post("/", protect, upload.array("media", 10), createPost);
+
+// Get paginated posts
+// Supports: /api/posts?page=1
 router.get("/", protect, getPosts);
-router.put("/:id/like", protect, likePost);
-router.put("/:id/unlike", protect, unlikePost);
+
+// Delete a post
 router.delete("/:id", protect, deletePost);
+
+// Update a post (caption/tags/media replacement)
 router.put("/:id", protect, upload.array("media", 10), updatePost);
 
 export default router;

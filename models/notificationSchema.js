@@ -3,7 +3,6 @@ import mongoose from "mongoose";
 const notificationSchema = new mongoose.Schema(
   {
     user: {
-      // The recipient of the notification
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
@@ -26,26 +25,22 @@ const notificationSchema = new mongoose.Schema(
     },
 
     from: {
-      // The user who triggered the notification
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
 
     post: {
-      // Related post (if any)
       type: mongoose.Schema.Types.ObjectId,
       ref: "Post",
     },
 
     comment: {
-      // Related comment (if any)
       type: mongoose.Schema.Types.ObjectId,
       ref: "Comment",
     },
 
     story: {
-      // Related story (if any, e.g., story view, tag)
       type: mongoose.Schema.Types.ObjectId,
       ref: "Story",
     },
@@ -56,12 +51,18 @@ const notificationSchema = new mongoose.Schema(
     },
 
     message: {
-      // Optional custom message
       type: String,
       default: "",
     },
   },
   { timestamps: true }
 );
+
+// ✅ Recommended indexes
+notificationSchema.index({ user: 1, createdAt: -1 }); // feed performance
+notificationSchema.index({ user: 1, isRead: 1 }); // unread filter
+notificationSchema.index({ post: 1 });
+notificationSchema.index({ comment: 1 });
+notificationSchema.index({ story: 1 });
 
 export default mongoose.model("Notification", notificationSchema);

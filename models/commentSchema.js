@@ -35,7 +35,13 @@ const commentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// 🔹 Index for faster post comment retrieval, newest first
+// 🔹 Existing: Index for retrieving post comments by newest
 commentSchema.index({ post: 1, createdAt: -1 });
+
+// 🔹 NEW: For faster user-based comment queries
+commentSchema.index({ createdBy: 1 });
+
+// 🔹 NEW: Optional full-text search on comment content
+commentSchema.index({ text: "text" });
 
 export default mongoose.model("Comment", commentSchema);

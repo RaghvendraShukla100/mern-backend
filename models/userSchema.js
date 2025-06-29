@@ -3,7 +3,11 @@ import bcrypt from "bcrypt";
 
 const userSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, trim: true },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
 
     username: {
       type: String,
@@ -27,11 +31,21 @@ const userSchema = new mongoose.Schema(
       match: [/^\d{10}$/, "Mobile number must be 10 digits"],
     },
 
-    age: { type: Number, min: 13, default: null },
+    age: {
+      type: Number,
+      min: 13,
+      default: null,
+    },
 
-    bio: { type: String, default: "" },
+    bio: {
+      type: String,
+      default: "",
+    },
 
-    profilePic: { type: String, default: "" },
+    profilePic: {
+      type: String,
+      default: "",
+    },
 
     password: {
       type: String,
@@ -51,22 +65,42 @@ const userSchema = new mongoose.Schema(
       },
     },
 
-    followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    followers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
 
-    following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    following: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
 
-    isVerified: { type: Boolean, default: false },
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
 
-    passwordResetToken: { type: String },
+    passwordResetToken: {
+      type: String,
+    },
 
-    passwordResetExpires: { type: Date },
+    passwordResetExpires: {
+      type: Date,
+    },
 
-    isPrivate: { type: Boolean, default: false },
+    isPrivate: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );
 
-// Hash password before save
+// 🔐 Hash password before saving (schema-level)
 userSchema.pre("save", async function (next) {
   if (this.isModified("password")) {
     this.password = await bcrypt.hash(this.password, 10);
@@ -74,10 +108,20 @@ userSchema.pre("save", async function (next) {
   next();
 });
 
-// Compare password
+// 🔐 Compare password during login
 userSchema.methods.comparePassword = function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
+
+// 👤 Virtual for @username display
+userSchema.virtual("displayUsername").get(function () {
+  return "@" + this.username.charAt(0).toUpperCase() + this.username.slice(1);
+});
+
+// 📊 Indexes for performance and search
+userSchema.index({ followers: 1 });
+userSchema.index({ following: 1 });
+userSchema.index({ name: "text", username: "text", bio: "text" });
 
 const User = mongoose.model("User", userSchema);
 export default User;

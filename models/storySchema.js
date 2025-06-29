@@ -2,10 +2,10 @@ import mongoose from "mongoose";
 
 const storySchema = new mongoose.Schema(
   {
-    image: { type: String }, // Can be image or video
-    video: { type: String }, // Optional: video file if it’s a reel snippet
+    image: { type: String },
+    video: { type: String },
     caption: { type: String, default: "" },
-    music: { type: String, default: "" }, // Music track name or URL if you store music
+    music: { type: String, default: "" },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -14,8 +14,17 @@ const storySchema = new mongoose.Schema(
     viewers: [
       { type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] },
     ],
+    createdAt: {
+      type: Date,
+      default: Date.now,
+      expires: 86400, // TTL for auto-deletion
+    },
   },
-  { timestamps: true, expireAfterSeconds: 86400 }
+  { timestamps: { updatedAt: true } } // manual override
 );
+
+// Optional indexes
+storySchema.index({ createdBy: 1 });
+storySchema.index({ viewers: 1 });
 
 export default mongoose.model("Story", storySchema);

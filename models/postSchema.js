@@ -21,7 +21,7 @@ const postSchema = new mongoose.Schema(
       type: String,
       default: "",
       trim: true,
-      maxlength: 2200, // Instagram-like caption limit
+      maxlength: 2200,
     },
     media: {
       type: [mediaSchema],
@@ -35,13 +35,6 @@ const postSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    likes: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
-    ],
-
     isArchived: {
       type: Boolean,
       default: false,
@@ -56,5 +49,11 @@ const postSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// ✅ Performance indexes
+postSchema.index({ createdBy: 1 });
+postSchema.index({ createdAt: -1 });
+postSchema.index({ tags: 1 });
+postSchema.index({ isArchived: 1 });
 
 export default mongoose.model("Post", postSchema);

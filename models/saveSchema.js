@@ -10,7 +10,10 @@ const saveSchema = new mongoose.Schema(
   }
 );
 
-// Ensure a user can't save the same post twice
+// Prevent duplicate saves
 saveSchema.index({ user: 1, post: 1 }, { unique: true });
+
+// Improve aggregation and count performance
+saveSchema.index({ post: 1 });
 
 export default mongoose.model("Save", saveSchema);

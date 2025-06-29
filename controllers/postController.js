@@ -1,6 +1,6 @@
 import Post from "../models/postSchema.js";
 import Notification from "../models/notificationSchema.js";
-import User from "../models/userSchema.js"; // Needed to get followers
+import User from "../models/userSchema.js";
 import mongoose from "mongoose";
 
 /**
@@ -12,20 +12,17 @@ export const createPost = async (req, res) => {
   try {
     const { caption, tags } = req.body;
 
-    // Validate media presence
     if (!req.files || req.files.length === 0) {
       return res
         .status(400)
         .json({ message: "At least one media file is required" });
     }
 
-    // Format media files
     const media = req.files.map((file) => ({
       url: file.path,
       type: file.mimetype.startsWith("video") ? "video" : "image",
     }));
 
-    // Create the post
     const post = await Post.create({
       caption,
       media,
@@ -37,20 +34,17 @@ export const createPost = async (req, res) => {
         : [],
     });
 
-    // Fetch followers of the user
     const user = await User.findById(req.user._id).select("followers");
 
     if (user && user.followers.length > 0) {
-      // Generate notifications for followers
       const notifications = user.followers.map((followerId) => ({
-        user: followerId, // Notification recipient
-        type: "post", // Type of notification
-        from: req.user._id, // Who created the post
-        post: post._id, // The new post ID
+        user: followerId,
+        type: "post",
+        from: req.user._id,
+        post: post._id,
         message: `${req.user.name || "Someone"} posted a new update`,
       }));
 
-      // Insert notifications in bulk
       await Notification.insertMany(notifications);
     }
 
@@ -64,62 +58,101 @@ export const createPost = async (req, res) => {
 };
 
 /**
- * @desc    Get all posts (feed)
- * @route   GET /api/posts
+ * @desc    Get paginated posts only (clean, scalable)
+ * @route   GET /api/posts?page=1
  * @access  Private
  */
 export const getPosts = async (req, res) => {
   try {
-    const posts = await Post.find()
-      .populate("createdBy", "name username profilePic")
-      .sort({ createdAt: -1 });
+    const page = parseInt(req.query.page) || 1;
+    const limit = 10;
+    const skip = (page - 1) * limit;
+    const userId = req.user._id;
+
+    const posts = await Post.aggregate([
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+
+      // Lookup user details
+      {
+        $lookup: {
+          from: "users",
+          localField: "createdBy",
+          foreignField: "_id",
+          as: "createdBy",
+        },
+      },
+      { $unwind: "$createdBy" },
+
+      // Lookup likes count
+      {
+        $lookup: {
+          from: "likes",
+          localField: "_id",
+          foreignField: "post",
+          as: "likes",
+        },
+      },
+      {
+        $addFields: {
+          likeCount: { $size: "$likes" },
+          isLikedByUser: {
+            $in: [userId, "$likes.user"],
+          },
+        },
+      },
+
+      // Lookup comments count
+      {
+        $lookup: {
+          from: "comments",
+          localField: "_id",
+          foreignField: "post",
+          as: "comments",
+        },
+      },
+      {
+        $addFields: {
+          commentCount: { $size: "$comments" },
+          isCommentedByUser: {
+            $in: [userId, "$comments.createdBy"],
+          },
+        },
+      },
+
+      // Lookup saves count
+      {
+        $lookup: {
+          from: "saves",
+          localField: "_id",
+          foreignField: "post",
+          as: "saves",
+        },
+      },
+      {
+        $addFields: {
+          saveCount: { $size: "$saves" },
+          isSavedByUser: {
+            $in: [userId, "$saves.user"],
+          },
+        },
+      },
+
+      // Clean up
+      {
+        $project: {
+          likes: 0,
+          comments: 0,
+          saves: 0,
+          "createdBy.password": 0,
+        },
+      },
+    ]);
 
     res.json(posts);
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-};
-
-/**
- * @desc    Like a post
- * @route   PUT /api/posts/:id/like
- * @access  Private
- */
-export const likePost = async (req, res) => {
-  try {
-    const post = await Post.findById(req.params.id);
-    if (!post) return res.status(404).json({ message: "Post not found" });
-
-    if (post.likes.includes(req.user._id)) {
-      return res.status(400).json({ message: "Already liked" });
-    }
-
-    post.likes.push(req.user._id);
-    await post.save();
-
-    res.json({ message: "Post liked" });
-  } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-};
-
-/**
- * @desc    Unlike a post
- * @route   PUT /api/posts/:id/unlike
- * @access  Private
- */
-export const unlikePost = async (req, res) => {
-  try {
-    const post = await Post.findById(req.params.id);
-    if (!post) return res.status(404).json({ message: "Post not found" });
-
-    post.likes = post.likes.filter(
-      (id) => id.toString() !== req.user._id.toString()
-    );
-    await post.save();
-
-    res.json({ message: "Post unliked" });
-  } catch (err) {
+    console.error("💥 Error in getPosts:", err);
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
@@ -148,7 +181,7 @@ export const deletePost = async (req, res) => {
 };
 
 /**
- * @desc    Update caption, tags or replace media
+ * @desc    Update caption, tags, or replace media
  * @route   PUT /api/posts/:id
  * @access  Private
  */
