@@ -69,6 +69,10 @@ export const getPosts = async (req, res) => {
     const skip = (page - 1) * limit;
     const userId = req.user._id;
 
+    // ✅ Fetch requesting user's following list once
+    const user = await User.findById(userId).select("following");
+    const followingList = user.following.map((id) => id.toString());
+
     const posts = await Post.aggregate([
       { $sort: { createdAt: -1 } },
       { $skip: skip },
@@ -85,7 +89,16 @@ export const getPosts = async (req, res) => {
       },
       { $unwind: "$createdBy" },
 
-      // Lookup likes count
+      // ✅ Add isFollowingCreator field based on the fetched following list
+      {
+        $addFields: {
+          isFollowingCreator: {
+            $in: [{ $toString: "$createdBy._id" }, followingList],
+          },
+        },
+      },
+
+      // Lookup likes
       {
         $lookup: {
           from: "likes",
@@ -97,13 +110,11 @@ export const getPosts = async (req, res) => {
       {
         $addFields: {
           likeCount: { $size: "$likes" },
-          isLikedByUser: {
-            $in: [userId, "$likes.user"],
-          },
+          isLikedByUser: { $in: [userId, "$likes.user"] },
         },
       },
 
-      // Lookup comments count
+      // Lookup comments
       {
         $lookup: {
           from: "comments",
@@ -115,13 +126,11 @@ export const getPosts = async (req, res) => {
       {
         $addFields: {
           commentCount: { $size: "$comments" },
-          isCommentedByUser: {
-            $in: [userId, "$comments.createdBy"],
-          },
+          isCommentedByUser: { $in: [userId, "$comments.createdBy"] },
         },
       },
 
-      // Lookup saves count
+      // Lookup saves
       {
         $lookup: {
           from: "saves",
@@ -133,13 +142,10 @@ export const getPosts = async (req, res) => {
       {
         $addFields: {
           saveCount: { $size: "$saves" },
-          isSavedByUser: {
-            $in: [userId, "$saves.user"],
-          },
+          isSavedByUser: { $in: [userId, "$saves.user"] },
         },
       },
 
-      // Clean up
       {
         $project: {
           likes: 0,
@@ -215,5 +221,74 @@ export const updatePost = async (req, res) => {
     res.json(updated);
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+// get reels with enhanced creator and user interaction data
+export const getReels = async (req, res) => {
+  try {
+    const userId = req.user._id; // ensure protect middleware adds req.user
+    const page = parseInt(req.query.page) || 1;
+    const limit = 10;
+    const skip = (page - 1) * limit;
+
+    // Get user's following list and saved reels list
+    const user = await User.findById(userId).select(
+      "following savedPosts likedPosts"
+    );
+    const followedUserIds = user.following || [];
+    const savedPostIds = user.savedPosts?.map((id) => id.toString()) || [];
+    const likedPostIds = user.likedPosts?.map((id) => id.toString()) || [];
+
+    // Aggregation pipeline
+    const reels = await Post.aggregate([
+      { $match: { "media.type": "video", isArchived: false } },
+      {
+        $addFields: {
+          isFollowed: { $in: ["$createdBy", followedUserIds] },
+          isSaved: { $in: [{ $toString: "$_id" }, savedPostIds] },
+          isLiked: { $in: [{ $toString: "$_id" }, likedPostIds] },
+        },
+      },
+      { $sort: { isFollowed: -1, createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: "users",
+          localField: "createdBy",
+          foreignField: "_id",
+          as: "creator",
+        },
+      },
+      { $unwind: "$creator" },
+      {
+        $project: {
+          caption: 1,
+          media: 1,
+          createdAt: 1,
+          tags: 1,
+          creatorId: "$creator._id",
+          creatorName: "$creator.name",
+          creatorUsername: "$creator.username",
+          creatorProfilePic: "$creator.profilePic",
+          isFollowedByCurrentUser: "$isFollowed",
+          isSavedByCurrentUser: "$isSaved",
+          isLikedByCurrentUser: "$isLiked",
+        },
+      },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      count: reels.length,
+      reels,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch reels",
+    });
   }
 };

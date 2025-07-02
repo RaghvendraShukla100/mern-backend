@@ -6,6 +6,7 @@ import { protect } from "../middlewares/authMiddleware.js";
 import {
   createPost,
   getPosts,
+  getReels,
   deletePost,
   updatePost,
 } from "../controllers/postController.js";
@@ -54,6 +55,10 @@ router.post("/", protect, upload.array("media", 10), createPost);
 // Get paginated posts
 // Supports: /api/posts?page=1
 router.get("/", protect, getPosts);
+
+// get paginated reels
+//  /api/post/reels
+router.get("/reels", protect, getReels);
 
 // Delete a post
 router.delete("/:id", protect, deletePost);

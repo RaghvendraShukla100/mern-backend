@@ -6,13 +6,12 @@ import {
   getUserProfile,
   updateUserProfile,
   deleteUserProfile,
-  followUser,
-  unfollowUser,
+  toggleFollow, // ✅ Correct import
   getFollowers,
   getFollowing,
-  // requestPasswordReset,
-  // resetPassword,
+  getUserWithPosts,
 } from "../controllers/userController.js";
+
 import { protect } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
@@ -20,8 +19,6 @@ const router = express.Router();
 // PUBLIC ROUTES
 router.post("/register", upload.single("profilePic"), registerUser);
 router.post("/login", loginUser);
-// router.post("/request-password-reset", requestPasswordReset);
-// router.post("/reset-password", resetPassword);
 
 // AUTHENTICATED USER PROFILE ROUTES
 router
@@ -30,9 +27,12 @@ router
   .put(protect, upload.single("profilePic"), updateUserProfile)
   .delete(protect, deleteUserProfile);
 
+// GET USER WITH POSTS (aggregation pipeline)
+router.get("/:id", protect, getUserWithPosts);
+
 // SOCIAL FEATURES
-router.put("/:id/follow", protect, followUser);
-router.put("/:id/unfollow", protect, unfollowUser);
+router.put("/:id/follow", protect, toggleFollow);
+
 router.get("/:id/followers", protect, getFollowers);
 router.get("/:id/following", protect, getFollowing);
 

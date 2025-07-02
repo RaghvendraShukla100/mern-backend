@@ -1,7 +1,12 @@
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import crypto from "crypto";
+import mongoose from "mongoose"; // ✅ REQUIRED for aggregation pipelines
 import User from "../models/userSchema.js";
+import Post from "../models/postSchema.js";
+import Like from "../models/likeSchema.js";
+import Save from "../models/saveSchema.js";
+import Comment from "../models/commentSchema.js";
 import Notification from "../models/notificationSchema.js";
 
 dotenv.config();
@@ -29,7 +34,7 @@ export const registerUser = async (req, res) => {
     if (existing) {
       return res
         .status(400)
-        .json({ message: "Email, username or mobile already registered" });
+        .json({ message: "Email, username, or mobile already registered" });
     }
 
     const user = await User.create({
@@ -57,7 +62,10 @@ export const registerUser = async (req, res) => {
       token: generateToken(user._id),
     });
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    res.status(500).json({
+      message: "Server error during registration",
+      error: err.message,
+    });
   }
 };
 
@@ -81,17 +89,102 @@ export const loginUser = async (req, res) => {
       token: generateToken(user._id),
     });
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Server error during login", error: err.message });
   }
 };
 
-// GET PROFILE
+// GET CURRENT USER PROFILE ALONG WITH HIS POSTS AND LIKE/COMMENT COUNTS and SECONDDEGERYUSERS
 export const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
-    res.json(user);
+    const userId = req.user._id;
+
+    // 1️⃣ Fetch current user profile excluding password
+    const user = await User.findById(userId).select("-password");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // 2️⃣ Fetch all posts created by the user (newest first)
+    const userPosts = await Post.find({ createdBy: userId })
+      .populate("createdBy", "username name profilePic")
+      .populate("media")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const postsWithCounts = await Promise.all(
+      userPosts.map(async (post) => {
+        const likeCount = await Like.countDocuments({ post: post._id });
+        const commentCount = await Comment.countDocuments({ post: post._id });
+        return {
+          ...post,
+          likeCount,
+          commentCount,
+        };
+      })
+    );
+
+    // 3️⃣ Fetch all saved posts by the user (full post data)
+    const savedDocs = await Save.find({ userId }).lean();
+    const savedPostIds = savedDocs.map((doc) => doc.postId);
+
+    const savedPostsRaw = await Post.find({ _id: { $in: savedPostIds } })
+      .populate("createdBy", "username name profilePic")
+      .populate("media")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const savedPostsWithCounts = await Promise.all(
+      savedPostsRaw.map(async (post) => {
+        const likeCount = await Like.countDocuments({ post: post._id });
+        const commentCount = await Comment.countDocuments({ post: post._id });
+        return {
+          ...post,
+          likeCount,
+          commentCount,
+        };
+      })
+    );
+
+    // 4️⃣ Fetch second-degree users
+    const firstDegreeUserIds = user.following.map((id) => id.toString());
+
+    const firstDegreeUsers = await User.find(
+      { _id: { $in: firstDegreeUserIds } },
+      { following: 1 }
+    ).lean();
+
+    const secondDegreeUserIdsSet = new Set();
+    firstDegreeUsers.forEach((fdUser) => {
+      fdUser.following.forEach((followedId) => {
+        secondDegreeUserIdsSet.add(followedId.toString());
+      });
+    });
+
+    firstDegreeUserIds.forEach((id) => secondDegreeUserIdsSet.delete(id));
+    secondDegreeUserIdsSet.delete(userId.toString());
+
+    const secondDegreeUserIds = Array.from(secondDegreeUserIdsSet);
+
+    const secondDegreeUsers = await User.find(
+      { _id: { $in: secondDegreeUserIds } },
+      "username name profilePic"
+    ).lean();
+
+    // 5️⃣ Return the structured response
+    res.json({
+      user,
+      userPosts: postsWithCounts,
+      savedPosts: savedPostsWithCounts,
+      secondDegreeUsers,
+    });
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    console.error("Error fetching user profile with posts and counts:", err);
+    res.status(500).json({
+      message: "Server error fetching profile",
+      error: err.message,
+    });
   }
 };
 
@@ -126,7 +219,9 @@ export const updateUserProfile = async (req, res) => {
       isPrivate: user.isPrivate,
     });
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Server error updating profile", error: err.message });
   }
 };
 
@@ -136,72 +231,71 @@ export const deleteUserProfile = async (req, res) => {
     await User.findByIdAndDelete(req.user._id);
     res.json({ message: "User deleted successfully" });
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Server error deleting user", error: err.message });
   }
 };
 
-// FOLLOW USER
-export const followUser = async (req, res) => {
+// TOGGLE FOLLOW / UNFOLLOW USER
+export const toggleFollow = async (req, res) => {
   try {
-    const userToFollow = await User.findById(req.params.id);
+    const targetUser = await User.findById(req.params.id);
     const currentUser = await User.findById(req.user._id);
 
-    if (!userToFollow)
+    if (!targetUser) {
       return res.status(404).json({ message: "User not found" });
-
-    if (userToFollow._id.equals(currentUser._id))
-      return res.status(400).json({ message: "You cannot follow yourself" });
-
-    if (currentUser.following.includes(userToFollow._id))
-      return res.status(400).json({ message: "Already following" });
-
-    if (userToFollow.isPrivate) {
-      // For private accounts, you'd implement a follow request system (optional)
-      return res
-        .status(403)
-        .json({ message: "Follow request required for private account" });
     }
 
-    currentUser.following.push(userToFollow._id);
-    userToFollow.followers.push(currentUser._id);
+    if (targetUser._id.equals(currentUser._id)) {
+      return res.status(400).json({ message: "You cannot follow yourself" });
+    }
 
-    await currentUser.save();
-    await userToFollow.save();
-    await Notification.create({
-      user: userToFollow._id,
-      type: "follow",
-      from: currentUser._id,
-      message: `${currentUser.name} started following you`,
+    const isFollowing = currentUser.following.includes(targetUser._id);
+
+    if (isFollowing) {
+      // ✅ Unfollow
+      currentUser.following = currentUser.following.filter(
+        (id) => !id.equals(targetUser._id)
+      );
+      targetUser.followers = targetUser.followers.filter(
+        (id) => !id.equals(currentUser._id)
+      );
+
+      await currentUser.save();
+      await targetUser.save();
+
+      return res.json({ message: "Unfollowed user", isFollowing: false });
+    } else {
+      // ✅ Check private before follow
+      if (targetUser.isPrivate) {
+        return res.status(403).json({
+          message: "Follow request required for private account",
+        });
+      }
+
+      // ✅ Follow
+      currentUser.following.push(targetUser._id);
+      targetUser.followers.push(currentUser._id);
+
+      await currentUser.save();
+      await targetUser.save();
+
+      await Notification.create({
+        user: targetUser._id,
+        type: "follow",
+        from: currentUser._id,
+        message: `${currentUser.name} started following you`,
+      });
+
+      return res.json({ message: "Followed user", isFollowing: true });
+    }
+  } catch (err) {
+    console.error("Error in toggleFollow:", err);
+    res.status(500).json({
+      message: "Server error toggling follow status",
+      error: err.message,
     });
-
-    res.json({ message: "Followed user and notification sent" });
-  } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-};
-
-// UNFOLLOW USER
-export const unfollowUser = async (req, res) => {
-  try {
-    const userToUnfollow = await User.findById(req.params.id);
-    const currentUser = await User.findById(req.user._id);
-
-    if (!userToUnfollow)
-      return res.status(404).json({ message: "User not found" });
-
-    currentUser.following = currentUser.following.filter(
-      (id) => !id.equals(userToUnfollow._id)
-    );
-    userToUnfollow.followers = userToUnfollow.followers.filter(
-      (id) => !id.equals(currentUser._id)
-    );
-
-    await currentUser.save();
-    await userToUnfollow.save();
-
-    res.json({ message: "Unfollowed user" });
-  } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
@@ -215,7 +309,9 @@ export const getFollowers = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user.followers);
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Server error fetching followers", error: err.message });
   }
 };
 
@@ -229,6 +325,64 @@ export const getFollowing = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user.following);
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Server error fetching following", error: err.message });
+  }
+};
+
+// GET USER WITH POSTS USING AGGREGATION
+export const getUserWithPosts = async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid user ID" });
+    }
+
+    const requestingUserId = req.user._id; // ✅ requesting user's _id for check
+
+    const userWithPosts = await User.aggregate([
+      { $match: { _id: new mongoose.Types.ObjectId(userId) } },
+      {
+        $lookup: {
+          from: "posts",
+          localField: "_id",
+          foreignField: "createdBy",
+          as: "posts",
+        },
+      },
+      {
+        $addFields: {
+          followersCount: { $size: "$followers" },
+          followingCount: { $size: "$following" },
+          postsCount: { $size: "$posts" },
+          isFollowing: {
+            $in: [new mongoose.Types.ObjectId(requestingUserId), "$followers"],
+          },
+        },
+      },
+      {
+        $project: {
+          password: 0,
+          __v: 0,
+          "posts.__v": 0,
+          "posts.updatedAt": 0,
+          "posts.comments": 0,
+        },
+      },
+    ]);
+
+    if (!userWithPosts || userWithPosts.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json(userWithPosts[0]);
+  } catch (error) {
+    console.error("Error fetching user with posts:", error);
+    res.status(500).json({
+      message: "Server error fetching user with posts",
+      error: error.message,
+    });
   }
 };

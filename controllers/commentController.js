@@ -4,7 +4,7 @@ import Notification from "../models/notificationSchema.js";
 import mongoose from "mongoose";
 
 // @desc    Create a comment on a post
-// @route   POST /api/comments/post/:postId
+// @route   POST /api/comments/:postId
 // @access  Private
 export const createComment = async (req, res) => {
   try {
@@ -110,7 +110,7 @@ export const updateComment = async (req, res) => {
 };
 
 // @desc    Get paginated comments for a specific post
-// @route   GET /api/comments/post/:postId?page=1&limit=10
+// @route   GET /api/comments/:postId?page=1&limit=10
 // @access  Public
 export const getCommentsForPost = async (req, res) => {
   try {
